@@ -21,7 +21,9 @@ import {
   Lock,
   Calendar,
   User,
-  HardDrive
+  HardDrive,
+  Key,
+  X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -30,49 +32,85 @@ const FileList: React.FC = () => {
   const [files, setFiles] = useState<FileMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
+  const [showKeyPrompt, setShowKeyPrompt] = useState<FileMetadata | null>(null);
+  const [decryptionKey, setDecryptionKey] = useState('');
 
   useEffect(() => {
     if (!currentUser) return;
 
-    const filesQuery = query(
+    // Fetch both owned files and files shared with the user
+    const ownFilesQuery = query(
       collection(db, 'files'),
       where('uploadedBy', '==', currentUser.uid),
       orderBy('uploadedAt', 'desc')
     );
 
-    const unsubscribe = onSnapshot(filesQuery, (snapshot) => {
-      const fileList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as FileMetadata[];
-      
-      setFiles(fileList);
-      setLoading(false);
-    });
+    const sharedFilesQuery = query(
+      collection(db, 'files'),
+      where('allowedUsers', 'array-contains', currentUser.uid),
+      orderBy('uploadedAt', 'desc')
+    );
 
-    return () => unsubscribe();
+    const allFilesMap = new Map<string, FileMetadata>();
+
+    const processSnapshot = (snapshot: any) => {
+      snapshot.docs.forEach((doc: any) => {
+        const fileData = {
+          id: doc.id,
+          ...doc.data()
+        } as FileMetadata;
+        allFilesMap.set(doc.id, fileData);
+      });
+      
+      setFiles(Array.from(allFilesMap.values()));
+      setLoading(false);
+    };
+
+    const unsubscribeOwn = onSnapshot(ownFilesQuery, processSnapshot);
+    const unsubscribeShared = onSnapshot(sharedFilesQuery, processSnapshot);
+
+    return () => {
+      unsubscribeOwn();
+      unsubscribeShared();
+    };
   }, [currentUser]);
 
   const downloadFile = async (file: FileMetadata) => {
-    if (!file.downloadUrl || !file.encryptionKey || !file.iv) {
+    if (!file.downloadUrl || !file.iv) {
       toast.error('File cannot be downloaded - missing encryption data');
       return;
     }
 
+    // Show key prompt modal
+    setShowKeyPrompt(file);
+  };
+
+  const handleDownloadWithKey = async () => {
+    if (!showKeyPrompt || !decryptionKey.trim()) {
+      toast.error('Please enter the decryption key');
+      return;
+    }
+
+    const file = showKeyPrompt;
     setDownloadingFiles(prev => new Set(prev).add(file.id));
+    setShowKeyPrompt(null);
 
     try {
       // Fetch the encrypted file
-      const response = await fetch(file.downloadUrl);
+      const response = await fetch(file.downloadUrl!);
       if (!response.ok) throw new Error('Failed to download file');
       
       const encryptedData = await response.arrayBuffer();
       
-      // Decrypt the file
+      // Decrypt the file with user-provided key
       const decryptedData = decryptFile({
         data: encryptedData,
-        iv: file.iv
-      }, file.encryptionKey);
+        iv: file.iv!
+      }, decryptionKey);
+
+      if (!decryptedData) {
+        throw new Error('Decryption failed - incorrect key or corrupted file');
+      }
 
       // Create blob and download
       const blob = new Blob([decryptedData], { type: file.type });
@@ -87,9 +125,10 @@ const FileList: React.FC = () => {
       URL.revokeObjectURL(url);
 
       toast.success('File downloaded successfully');
+      setDecryptionKey(''); // Clear key after successful download
     } catch (error: any) {
       console.error('Download error:', error);
-      toast.error('Failed to download file');
+      toast.error(error.message || 'Failed to download file');
     } finally {
       setDownloadingFiles(prev => {
         const newSet = new Set(prev);
@@ -250,6 +289,66 @@ const FileList: React.FC = () => {
           </div>
         ))}
       </div>
+
+      {/* Decryption Key Prompt Modal */}
+      {showKeyPrompt && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50 flex items-center justify-center px-4">
+          <div className="relative mx-auto p-5 border w-full max-w-md shadow-lg rounded-md bg-white">
+            <button
+              onClick={() => {
+                setShowKeyPrompt(null);
+                setDecryptionKey('');
+              }}
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"
+            >
+              <X className="h-6 w-6" />
+            </button>
+            <div className="mt-3 text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100">
+                <Key className="h-6 w-6 text-blue-600" />
+              </div>
+              <h3 className="text-lg leading-6 font-medium text-gray-900 mt-4">
+                Enter Decryption Key
+              </h3>
+              <div className="mt-2 px-7 py-3">
+                <p className="text-sm text-gray-600 mb-4">
+                  Please enter the encryption key to download and decrypt{' '}
+                  <span className="font-medium">{showKeyPrompt.originalName || showKeyPrompt.name}</span>
+                </p>
+                <input
+                  type="password"
+                  value={decryptionKey}
+                  onChange={(e) => setDecryptionKey(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleDownloadWithKey()}
+                  placeholder="Enter encryption key..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
+              </div>
+              <div className="items-center px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                <button
+                  type="button"
+                  onClick={handleDownloadWithKey}
+                  disabled={!decryptionKey.trim()}
+                  className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Download
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowKeyPrompt(null);
+                    setDecryptionKey('');
+                  }}
+                  className="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:mt-0 sm:w-auto sm:text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

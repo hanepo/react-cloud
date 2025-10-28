@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'; // Added useRef import
+import React, { useState, useEffect, useRef, useCallback } from 'react'; // Added useRef, useCallback
 import {
   collection,
   query,
@@ -7,14 +7,15 @@ import {
   onSnapshot,
   deleteDoc,
   doc,
-  Timestamp // Import Timestamp type if needed for comparison
-  // Removed unused getDocs, writeBatch
+  Timestamp, // Import Timestamp type
+  updateDoc, // Import updateDoc for permissions
+  getDocs // Import getDocs to fetch all users
 } from 'firebase/firestore';
 import { ref, deleteObject } from 'firebase/storage';
 import { db, storage } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { decryptFile } from '../../utils/encryption';
-import type { FileMetadata, Folder } from '../../types';
+import type { FileMetadata, Folder, UserRole, User } from '../../types'; // Import User type
 import FolderTree from './FolderTree';
 import {
   File,
@@ -23,14 +24,15 @@ import {
   Eye,
   Lock,
   Calendar,
-  // Removed unused User import
   HardDrive,
   Grid3X3,
   List,
   Search,
   ArrowUp,
   Folder as FolderIcon,
-  Key
+  Key,
+  ShieldCheck, // Icon for permissions
+  X // Icon for closing modals
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -44,6 +46,199 @@ type SortDirection = 'asc' | 'desc';
 
 // Define a type for the sortable values
 type SortableValue = string | number | Date | Timestamp | undefined;
+
+// Component for Permissions Modal
+interface PermissionModalProps {
+    file: FileMetadata;
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (fileId: string, permissions: { roles: UserRole[], users: string[] }) => Promise<void>;
+}
+
+const PermissionModal: React.FC<PermissionModalProps> = ({ file, isOpen, onClose, onSave }) => {
+    const [pendingRoles, setPendingRoles] = useState<Set<UserRole>>(
+        new Set(file.allowedRoles || [])
+    );
+    const [pendingUsers, setPendingUsers] = useState<Set<string>>(
+        new Set(file.allowedUsers || [])
+    );
+    const [allUsers, setAllUsers] = useState<User[]>([]);
+    const [isSaving, setIsSaving] = useState(false);
+    const [loadingUsers, setLoadingUsers] = useState(true);
+    const availableRoles: UserRole[] = ['admin', 'editor', 'viewer'];
+
+    // Fetch all users for selection
+    useEffect(() => {
+        const fetchUsers = async () => {
+            try {
+                const usersQuery = query(collection(db, 'users'));
+                const snapshot = await getDocs(usersQuery);
+                const usersList = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                })) as User[];
+                setAllUsers(usersList);
+            } catch (error) {
+                console.error('Error fetching users:', error);
+                toast.error('Failed to load users');
+            } finally {
+                setLoadingUsers(false);
+            }
+        };
+        if (isOpen) {
+            fetchUsers();
+        }
+    }, [isOpen]);
+
+    // Reset state when file changes while modal is open (edge case)
+    useEffect(() => {
+        setPendingRoles(new Set(file.allowedRoles || []));
+        setPendingUsers(new Set(file.allowedUsers || []));
+    }, [file]);
+
+    const handleRoleChange = (role: UserRole, checked: boolean) => {
+        setPendingRoles(prev => {
+            const newSet = new Set(prev);
+            if (checked) {
+                newSet.add(role);
+            } else {
+                newSet.delete(role);
+            }
+            return newSet;
+        });
+    };
+
+    const handleUserChange = (userId: string, checked: boolean) => {
+        setPendingUsers(prev => {
+            const newSet = new Set(prev);
+            if (checked) {
+                newSet.add(userId);
+            } else {
+                newSet.delete(userId);
+            }
+            return newSet;
+        });
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            await onSave(file.id, {
+                roles: Array.from(pendingRoles),
+                users: Array.from(pendingUsers)
+            });
+            onClose(); // Close modal on success
+        } catch (error) {
+            // Error toast is handled in onSave, just log here
+            console.error("Error saving permissions:", error);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50 flex items-center justify-center px-4" aria-labelledby="permission-modal-title" role="dialog" aria-modal="true">
+            <div className="relative mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+                <button
+                    onClick={onClose}
+                    className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"
+                    aria-label="Close permissions modal"
+                >
+                    <X className="h-6 w-6"/>
+                </button>
+                <div className="mt-3">
+                    <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100">
+                        <ShieldCheck className="h-6 w-6 text-blue-600" aria-hidden="true"/>
+                    </div>
+                    <h3 className="text-lg leading-6 font-medium text-gray-900 mt-4 text-center" id="permission-modal-title">Manage File Access</h3>
+                    <div className="mt-4 px-4 py-3">
+                         <p className="text-sm text-gray-600 mb-4 text-center">
+                            Configure who can access <span className="font-medium">{file.originalName || file.name}</span>
+                         </p>
+                         
+                         {/* Role-based permissions */}
+                         <div className="mb-6">
+                             <h4 className="text-sm font-medium text-gray-900 mb-3">Access by Role</h4>
+                             <div className="space-y-2 text-left border rounded-md p-3 bg-gray-50">
+                                 {availableRoles.map((role) => (
+                                     <div key={role} className="flex items-center">
+                                         <input
+                                             id={`role-${role}`}
+                                             name="roles"
+                                             type="checkbox"
+                                             checked={pendingRoles.has(role)}
+                                             onChange={(e) => handleRoleChange(role, e.target.checked)}
+                                             className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                         />
+                                         <label htmlFor={`role-${role}`} className="ml-3 block text-sm font-medium text-gray-700 capitalize">
+                                             {role}
+                                         </label>
+                                     </div>
+                                 ))}
+                             </div>
+                         </div>
+
+                         {/* User-specific permissions */}
+                         <div>
+                             <h4 className="text-sm font-medium text-gray-900 mb-3">Access by Specific Users</h4>
+                             {loadingUsers ? (
+                                 <div className="flex justify-center py-4">
+                                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                 </div>
+                             ) : (
+                                 <div className="space-y-2 text-left border rounded-md p-3 bg-gray-50 max-h-60 overflow-y-auto">
+                                     {allUsers.length === 0 ? (
+                                         <p className="text-sm text-gray-500 text-center py-2">No users available</p>
+                                     ) : (
+                                         allUsers.map((user) => (
+                                             <div key={user.uid} className="flex items-center justify-between py-1 hover:bg-white px-2 rounded">
+                                                 <div className="flex items-center flex-1">
+                                                     <input
+                                                         id={`user-${user.uid}`}
+                                                         name="users"
+                                                         type="checkbox"
+                                                         checked={pendingUsers.has(user.uid)}
+                                                         onChange={(e) => handleUserChange(user.uid, e.target.checked)}
+                                                         className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                                     />
+                                                     <label htmlFor={`user-${user.uid}`} className="ml-3 block text-sm text-gray-700 flex-1">
+                                                         <div>{user.email}</div>
+                                                         <div className="text-xs text-gray-500">
+                                                             Role: <span className="capitalize">{user.role}</span>
+                                                         </div>
+                                                     </label>
+                                                 </div>
+                                             </div>
+                                         ))
+                                     )}
+                                 </div>
+                             )}
+                         </div>
+                    </div>
+                    <div className="items-center px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6 border-t mt-4 pt-4">
+                        <button
+                            type="button"
+                            onClick={handleSave}
+                            disabled={isSaving}
+                            className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isSaving ? 'Saving...' : 'Save Permissions'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:mt-0 sm:w-auto sm:text-sm"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 
 const FileManager: React.FC<FileManagerProps> = ({ className }) => {
@@ -62,35 +257,59 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
   const [showKeyPrompt, setShowKeyPrompt] = useState<FileMetadata | null>(null); // State for key prompt modal
   const [decryptionKey, setDecryptionKey] = useState(''); // State for decryption key input
 
+  // --- State for Permissions Modal ---
+  const [showPermissionModal, setShowPermissionModal] = useState<FileMetadata | null>(null);
+
+
   useEffect(() => {
     if (!currentUser) return;
 
     setLoading(true);
-    // Listen to files owned by the user
-    // Consider adding RBAC filtering here later
-    const filesQuery = query(
+    
+    // We need to fetch files in two queries since Firestore doesn't support OR queries with different fields
+    // Query 1: Files uploaded by the user
+    const ownFilesQuery = query(
       collection(db, 'files'),
       where('uploadedBy', '==', currentUser.uid),
-      orderBy('uploadedAt', 'desc') // Initial sort by date desc
+      orderBy('uploadedAt', 'desc')
     );
 
-    const unsubscribeFiles = onSnapshot(filesQuery, (snapshot) => {
-      const fileList = snapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-              id: doc.id,
-              ...data,
-              // Ensure uploadedAt is consistently a Date object or Timestamp
-              uploadedAt: data.uploadedAt?.toDate ? data.uploadedAt.toDate() : (data.uploadedAt ? new Date(data.uploadedAt) : new Date())
-          } as FileMetadata;
-      });
+    // Query 2: Files where user is in allowedUsers array
+    const sharedFilesQuery = query(
+      collection(db, 'files'),
+      where('allowedUsers', 'array-contains', currentUser.uid),
+      orderBy('uploadedAt', 'desc')
+    );
 
-      setAllFiles(fileList);
+    const allFilesMap = new Map<string, FileMetadata>();
+
+    const processSnapshot = (snapshot: any) => {
+      snapshot.docs.forEach((doc: any) => {
+        const data = doc.data();
+        const fileData = {
+          id: doc.id,
+          ...data,
+          uploadedAt: data.uploadedAt?.toDate ? data.uploadedAt.toDate() : (data.uploadedAt ? new Date(data.uploadedAt) : new Date())
+        } as FileMetadata;
+        allFilesMap.set(doc.id, fileData);
+      });
+      
+      // Update state with combined files
+      setAllFiles(Array.from(allFilesMap.values()));
       setLoading(false);
-    }, (error) => {
-        console.error("Error fetching files:", error);
-        toast.error("Could not load files.");
-        setLoading(false);
+    };
+
+    // Listen to both queries
+    const unsubscribeOwnFiles = onSnapshot(ownFilesQuery, processSnapshot, (error) => {
+      console.error("Error fetching own files:", error);
+      toast.error("Could not load your files.");
+      setLoading(false);
+    });
+
+    const unsubscribeSharedFiles = onSnapshot(sharedFilesQuery, processSnapshot, (error) => {
+      console.error("Error fetching shared files:", error);
+      // Don't show error toast for shared files as it might be empty
+      setLoading(false);
     });
 
 
@@ -111,7 +330,8 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
     });
 
     return () => {
-      unsubscribeFiles();
+      unsubscribeOwnFiles();
+      unsubscribeSharedFiles();
       unsubscribeFolders();
     };
   }, [currentUser]);
@@ -119,12 +339,9 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
   // Filter and sort files when dependencies change
   useEffect(() => {
     const filterAndSortFiles = () => {
-        // Removed unused currentFolder and currentPath variables
-        // const currentFolder = getCurrentFolder();
-        // const currentPath = currentFolder ? currentFolder.path + '/' : '/'; // Path needs trailing slash for prefix check
 
         const filtered = allFiles.filter(file => {
-          // Determine if the file is directly in the selected folder or root
+           // Determine if the file is directly in the selected folder or root
            const isInSelectedFolder = selectedFolderId
              ? file.folderId === selectedFolderId
              : !file.folderId; // Show root files if no folder selected
@@ -161,7 +378,7 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
           aValue = getValue(a, sortField);
           bValue = getValue(b, sortField);
 
-          // Ensure values are comparable
+          // Ensure values are comparable (handle Date objects)
           const valA = aValue instanceof Date ? aValue.getTime() : aValue ?? '';
           const valB = bValue instanceof Date ? bValue.getTime() : bValue ?? '';
 
@@ -222,6 +439,8 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
     setDownloadingFiles(prev => new Set(prev).add(fileToDownload.id));
     setShowKeyPrompt(null); // Close prompt
 
+    let decryptedData: ArrayBuffer | null = null; // Initialize as null
+
     try {
       // Fetch the encrypted file
       const response = await fetch(fileToDownload.downloadUrl);
@@ -230,13 +449,21 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
       const encryptedData = await response.arrayBuffer();
 
       // Decrypt the file using the provided key and stored IV
-      const decryptedData = decryptFile({
+      decryptedData = decryptFile({ // Assign result here
         data: encryptedData,
         iv: fileToDownload.iv
       }, decryptionKey); // Use the key from state
 
+      // --- FIX: Check if decryption was successful ---
+      if (decryptedData === null) {
+          // decryptFile returns null on failure now (or throws)
+          // The error toast is handled inside decryptFile or caught below
+          throw new Error("Decryption failed internally."); // Ensure catch block is hit
+      }
+      // --- END FIX ---
+
       // Create blob and trigger download
-      const blob = new Blob([decryptedData], { type: fileToDownload.type });
+      const blob = new Blob([decryptedData], { type: fileToDownload.type }); // Now decryptedData is guaranteed to be ArrayBuffer
       const url = URL.createObjectURL(blob);
 
       const a = document.createElement('a');
@@ -250,12 +477,11 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
       toast.success('File downloaded and decrypted successfully');
     } catch (error: any) {
       console.error('Download/Decryption error:', error);
-      // Check for specific decryption errors (e.g., bad key)
-      // Note: CryptoJS errors might not be very specific. 'Malformed UTF-8 data' is a common indicator.
-      if (error instanceof Error && (error.message.includes('Malformed UTF-8 data') || error.message.includes('bad decrypt') || error.message.includes('invalid key') )) {
+      // Display specific error from decryptFile or generic download error
+      if (error instanceof Error && error.message.includes("Incorrect key")) {
           toast.error('Decryption failed. Incorrect key?');
       } else if (error instanceof Error) {
-           toast.error(`Download failed: ${error.message}`);
+           toast.error(`Operation failed: ${error.message}`);
       } else {
            toast.error('An unknown error occurred during download/decryption.');
       }
@@ -309,9 +535,6 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
     let deletedCount = 0;
     const errors: string[] = [];
     const filesToDelete = allFiles.filter(f => selectedFiles.has(f.id)); // Get full file objects
-
-    // Use Firestore batch write for metadata deletion for efficiency (if needed, though individual deletes might be okay)
-    // For storage, parallel deletion is fine.
 
     const deletePromises = filesToDelete.map(async (file) => {
        try {
@@ -370,6 +593,41 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
  // --- End Custom Confirmation Dialog ---
 
 
+ // --- Permissions Management ---
+ const handleOpenPermissionModal = (file: FileMetadata) => {
+     if (currentUser?.role !== 'admin') {
+         toast.error("Only admins can manage permissions.");
+         return;
+     }
+     setShowPermissionModal(file);
+ };
+
+ const handleSavePermissions = useCallback(async (fileId: string, permissions: { roles: UserRole[], users: string[] }) => {
+    if (!currentUser || currentUser.role !== 'admin') {
+        toast.error("Unauthorized action.");
+        throw new Error("Unauthorized"); // Prevent modal from closing if not admin
+    }
+    try {
+        const fileRef = doc(db, 'files', fileId);
+        await updateDoc(fileRef, {
+            allowedRoles: permissions.roles,
+            allowedUsers: permissions.users
+        });
+        toast.success('Permissions updated successfully!');
+        // Update local state optimistically
+        setAllFiles(prevFiles => prevFiles.map(f =>
+            f.id === fileId ? { ...f, allowedRoles: permissions.roles, allowedUsers: permissions.users } : f
+        ));
+    } catch (error: any) {
+        console.error('Error updating permissions:', error);
+        toast.error(`Failed to update permissions: ${error.message}`);
+        throw error; // Re-throw to keep modal open on error
+    }
+ }, [currentUser]); // currentUser dependency
+
+ // --- End Permissions Management ---
+
+
   const toggleFileSelection = (fileId: string) => {
     setSelectedFiles(prev => {
       const newSet = new Set(prev);
@@ -383,6 +641,7 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
   };
 
   const selectAllFiles = () => {
+    if (filteredFiles.length === 0) return; // Prevent selecting nothing
     if (selectedFiles.size === filteredFiles.length) {
       setSelectedFiles(new Set());
     } else {
@@ -404,6 +663,7 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
    const formatDate = (timestamp: any): string | null => { // Return type is string or null
      if (!timestamp) return null; // Return null for invalid input
 
+     // Handle Firestore Timestamp or standard Date objects or numbers/strings
      const date = timestamp instanceof Timestamp ? timestamp.toDate() : new Date(timestamp);
 
      if (isNaN(date.getTime())) {
@@ -468,7 +728,7 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
     </button>
   );
 
-  if (loading) {
+  if (loading && allFiles.length === 0) { // Only show initial loading state
     return (
       <div className="flex items-center justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -481,13 +741,13 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
     <div className={`grid grid-cols-1 lg:grid-cols-4 gap-6 ${className}`}>
         {/* --- Confirmation Modal --- */}
          {showConfirmModal && (
-             <div className="fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50 flex items-center justify-center px-4">
+             <div className="fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50 flex items-center justify-center px-4" aria-labelledby="confirm-modal-title" role="dialog" aria-modal="true">
                  <div className="relative mx-auto p-5 border w-full max-w-md shadow-lg rounded-md bg-white">
                      <div className="mt-3 text-center">
                          <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
                              <Trash2 className="h-6 w-6 text-red-600" aria-hidden="true"/>
                          </div>
-                         <h3 className="text-lg leading-6 font-medium text-gray-900 mt-4" id="modal-title">Confirm Deletion</h3>
+                         <h3 className="text-lg leading-6 font-medium text-gray-900 mt-4" id="confirm-modal-title">Confirm Deletion</h3>
                          <div className="mt-2 px-7 py-3">
                              <p className="text-sm text-gray-500">{confirmMessage}</p>
                          </div>
@@ -515,14 +775,14 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
 
         {/* --- Decryption Key Prompt Modal --- */}
          {showKeyPrompt && (
-             <div className="fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50 flex items-center justify-center px-4">
+             <div className="fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50 flex items-center justify-center px-4" aria-labelledby="key-modal-title" role="dialog" aria-modal="true">
                  <div className="relative mx-auto p-5 border w-full max-w-md shadow-lg rounded-md bg-white">
                       <button
                         onClick={() => { setShowKeyPrompt(null); setDecryptionKey(''); }}
                         className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"
                         aria-label="Close modal"
                       >
-                         &times; {/* Simple close icon */}
+                         <X className="h-6 w-6"/>
                       </button>
                      <div className="mt-3 text-center">
                          <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100">
@@ -567,6 +827,17 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
          )}
          {/* --- End Decryption Key Prompt Modal --- */}
 
+        {/* --- Permission Modal --- */}
+         {showPermissionModal && (
+            <PermissionModal
+                file={showPermissionModal}
+                isOpen={!!showPermissionModal}
+                onClose={() => setShowPermissionModal(null)}
+                onSave={handleSavePermissions}
+            />
+         )}
+        {/* --- End Permission Modal --- */}
+
 
       {/* Folder Tree Sidebar */}
       <div className="lg:col-span-1">
@@ -589,18 +860,18 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
                   {getCurrentFolder()?.name || 'Root'}
                 </h3>
                 <span className="text-sm text-gray-500 flex-shrink-0">
-                  ({filteredFiles.length} item{filteredFiles.length !== 1 ? 's' : ''}) {/* Correct pluralization */}
+                  ({filteredFiles.length} item{filteredFiles.length !== 1 ? 's' : ''})
                 </span>
               </div>
 
               <div className="flex items-center space-x-2 flex-shrink-0">
                 {/* Search */}
                 <div className="relative">
-                  <label htmlFor="file-search" className="sr-only">Search files</label> {/* Accessibility */}
+                  <label htmlFor="file-search" className="sr-only">Search files</label>
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" aria-hidden="true"/>
                   <input
                     id="file-search"
-                    type="search" // Use type search
+                    type="search"
                     placeholder="Search files..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -612,17 +883,17 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
                 <div className="flex border border-gray-300 rounded-md">
                   <button
                     onClick={() => setViewMode('list')}
-                    className={`p-2 ${viewMode === 'list' ? 'bg-blue-50 text-blue-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'} rounded-l-md`} // Rounded corners
+                    className={`p-2 ${viewMode === 'list' ? 'bg-blue-50 text-blue-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'} rounded-l-md`}
                      aria-label="List view"
-                     title="List view" // Tooltip
+                     title="List view"
                   >
                     <List className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => setViewMode('grid')}
-                    className={`p-2 border-l border-gray-300 ${viewMode === 'grid' ? 'bg-blue-50 text-blue-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'} rounded-r-md`} // Rounded corners
+                    className={`p-2 border-l border-gray-300 ${viewMode === 'grid' ? 'bg-blue-50 text-blue-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'} rounded-r-md`}
                      aria-label="Grid view"
-                     title="Grid view" // Tooltip
+                     title="Grid view"
                   >
                     <Grid3X3 className="h-4 w-4" />
                   </button>
@@ -637,9 +908,10 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
                   {selectedFiles.size} file{selectedFiles.size > 1 ? 's' : ''} selected
                 </span>
                 <div className="flex items-center space-x-2">
+                   {/* Add other bulk actions here if needed */}
                   <button
                     onClick={deleteSelectedFiles}
-                    className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 flex items-center" // Added flex
+                    className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 flex items-center"
                   >
                     <Trash2 className="h-4 w-4 mr-1" /> Delete
                   </button>
@@ -657,21 +929,28 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
           {/* Sort Controls (Only in List View) */}
          {viewMode === 'list' && (
              <div className="px-6 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-               <div className="flex items-center space-x-4 pl-10">
-                 <SortButton field="name">Name</SortButton>
-                 <SortButton field="size">Size</SortButton>
-                 <SortButton field="uploadedAt">Date Modified</SortButton>
-                 <SortButton field="type">Type</SortButton>
-               </div>
-                <input
+               {/* Container for sort buttons and checkbox */}
+               <div className="flex items-center space-x-4 flex-grow pl-10">
+                 {/* Checkbox aligned with list items */}
+                 <input
                      type="checkbox"
-                     aria-label="Select all files" // Accessibility
+                     aria-label="Select all files"
                      onChange={selectAllFiles}
                      checked={filteredFiles.length > 0 && selectedFiles.size === filteredFiles.length}
                      disabled={filteredFiles.length === 0}
-                     className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 mr-2"
+                     className="absolute left-6 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" // Position checkbox
                      title={selectedFiles.size === filteredFiles.length ? 'Deselect All' : 'Select All'}
                  />
+                 {/* Sort Buttons */}
+                 <div className="flex items-center space-x-4 pl-14"> {/* Adjust padding to align */}
+                     <SortButton field="name">Name</SortButton>
+                     <SortButton field="size">Size</SortButton>
+                     <SortButton field="uploadedAt">Date Modified</SortButton>
+                     <SortButton field="type">Type</SortButton>
+                 </div>
+               </div>
+               {/* Right side alignment placeholder or actions */}
+               {/* <div className="pr-16"></div> */}
              </div>
           )}
         </div>
@@ -680,7 +959,7 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
         <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
           {filteredFiles.length === 0 ? (
             <div className="text-center py-12 px-4">
-              <File className="mx-auto h-12 w-12 text-gray-400" />
+              <FolderIcon className="mx-auto h-12 w-12 text-gray-400" />
               <h3 className="mt-2 text-sm font-medium text-gray-900">
                 {searchQuery ? 'No files match your search' : 'This folder is empty'}
               </h3>
@@ -706,11 +985,11 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
                       : 'relative px-6 py-4 hover:bg-gray-50 focus-within:bg-gray-100 flex items-center justify-between group cursor-pointer' // Added focus-within styling
                   } ${selectedFiles.has(file.id) ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : ''}`}
                   onClick={() => toggleFileSelection(file.id)}
-                  onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') toggleFileSelection(file.id); }} // Keyboard selection
+                  onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') {e.preventDefault(); toggleFileSelection(file.id);} }} // Keyboard selection
                 >
                   {viewMode === 'grid' ? (
                     // Grid View
-                    <div className="text-center flex flex-col items-center justify-between h-full"> {/* Ensure content fills height */}
+                    <div className="text-center flex flex-col items-center justify-between h-full pt-4"> {/* Added padding top */}
                          {/* Checkbox */}
                          <input
                            type="checkbox"
@@ -722,11 +1001,11 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
                            onClick={(e) => e.stopPropagation()} // Prevent outer div click
                          />
                          {/* Icon */}
-                        <div className="mb-3 mt-4"> {/* Added margin top */}
+                        <div className="mb-3">
                             {getFileIcon(file.type)}
                         </div>
                          {/* Details */}
-                        <div className="space-y-1 w-full flex-grow flex flex-col justify-center"> {/* Center content vertically */}
+                        <div className="space-y-1 w-full flex-grow flex flex-col justify-center mb-8"> {/* Added margin bottom */}
                            <div className="flex items-center justify-center space-x-1">
                               <Lock className="h-3 w-3 text-blue-500 flex-shrink-0" aria-label="Encrypted"/>
                                <p id={`grid-item-name-${file.id}`} className="text-sm font-medium text-gray-900 truncate" title={file.originalName || file.name}>
@@ -751,6 +1030,17 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
                             >
                               <Download className="h-4 w-4" />
                             </button>
+                             {/* Permissions Button - Admin Only */}
+                             {currentUser?.role === 'admin' && (
+                                <button
+                                   onClick={(e) => { e.stopPropagation(); handleOpenPermissionModal(file); }}
+                                   className="p-1 text-gray-500 hover:text-purple-600 hover:bg-purple-100 rounded focus:outline-none focus:ring-1 focus:ring-purple-500"
+                                   title="Manage Permissions"
+                                   aria-label={`Manage permissions for ${file.originalName || file.name}`}
+                                >
+                                  <ShieldCheck className="h-4 w-4" />
+                                </button>
+                             )}
                             {(currentUser?.uid === file.uploadedBy || currentUser?.role === 'admin') && (
                                <button
                                   onClick={(e) => { e.stopPropagation(); deleteFile(file); }}
@@ -804,6 +1094,11 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
                               <Calendar className="h-3 w-3" />
                               <span>{formatDate(file.uploadedAt) ?? 'No date'}</span>
                             </div>
+                           {/* Optionally show owner if implementing shared file view */}
+                           {/* <div className="flex items-center space-x-1">
+                               <User className="h-3 w-3" />
+                               <span>{file.uploadedBy === currentUser?.uid ? 'You' : file.uploadedByEmail || 'Shared'}</span>
+                           </div> */}
                           </div>
                         </div>
                       </div>
@@ -820,6 +1115,18 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
                           <Download className="h-4 w-4" />
                         </button>
 
+                         {/* Permissions Button - Admin Only */}
+                         {currentUser?.role === 'admin' && (
+                             <button
+                                onClick={(e) => { e.stopPropagation(); handleOpenPermissionModal(file); }}
+                                className="p-2 text-gray-500 hover:text-purple-600 hover:bg-purple-100 rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-purple-500"
+                                title="Manage Permissions"
+                                aria-label={`Manage permissions for ${file.originalName || file.name}`}
+                             >
+                               <ShieldCheck className="h-4 w-4" />
+                             </button>
+                         )}
+
                          {(currentUser?.uid === file.uploadedBy || currentUser?.role === 'admin') && (
                             <button
                               onClick={(e) => { e.stopPropagation(); deleteFile(file); }}
@@ -834,12 +1141,11 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
 
                       {/* Downloading Indicator */}
                       {downloadingFiles.has(file.id) && (
-                        <div className="ml-4 flex-shrink-0 absolute right-20 top-1/2 transform -translate-y-1/2"> {/* Position indicator */}
+                         <div className="ml-4 flex-shrink-0 absolute right-24 top-1/2 transform -translate-y-1/2"> {/* Adjusted position */}
                           <div className="flex items-center space-x-2">
                              <div role="progressbar" aria-valuenow={33} aria-valuemin={0} aria-valuemax={100} className="w-16 bg-gray-200 rounded-full h-1.5 overflow-hidden">
                               <div className="bg-blue-600 h-1.5 rounded-full animate-pulse w-1/3"></div>
                             </div>
-                            {/* <span className="text-xs text-gray-500">Downloading...</span> */}
                           </div>
                         </div>
                       )}

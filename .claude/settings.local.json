@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/hanep/Downloads/Telegram Desktop/FINAL YEAR PROJECT/FINAL YEAR PROJECT/**)",
+      "Read(//c/Users/hanep/Downloads/Telegram Desktop/FINAL YEAR PROJECT/**)",
+      "Bash(npm install)",
+      "Read(//c/Users/hanep/Downloads/Telegram Desktop/**)",
+      "Bash(python -c \"from docx import Document; doc = Document(''c:\\Users\\hanep\\Downloads\\Telegram Desktop\\1-3final.docx''); print(''\\n''.join([p.text for p in doc.paragraphs]))\")",
+      "Bash(unzip -p \"c:\\Users\\hanep\\Downloads\\Telegram Desktop\\1-3final.docx\" word/document.xml)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

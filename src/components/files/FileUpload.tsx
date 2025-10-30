@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 // Note: Removed the hardcoded VITE_ENCRYPTION_KEY import
 import { encryptFile } from '../../utils/encryption';
 import { Upload, X, File, CheckCircle, AlertCircle, Folder, Key, Eye, EyeOff } from 'lucide-react';
-import type { Folder as FolderType, UserRole } from '../../types';
+import type { Folder as FolderType } from '../../types';
 import toast from 'react-hot-toast';
 
 interface FileUploadState {
@@ -147,6 +147,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ selectedFolderId, onUploadCompl
       updateFileState({ progress: 50 });
 
       // Create encrypted file blob
+      if (!encryptedData) {
+        throw new Error('Encryption failed');
+      }
       const encryptedBlob = new Blob([encryptedData.data]);
 
       // Upload to Firebase Storage with folder path
@@ -171,7 +174,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ selectedFolderId, onUploadCompl
         size: fileState.file.size,
         type: fileState.file.type,
         // DO NOT STORE THE PLAINTEXT KEY HERE! Store only the IV.
-        iv: encryptedData.iv,
+        iv: encryptedData?.iv || '',
         uploadedBy: currentUser.uid,
         uploadedAt: serverTimestamp(),
         downloadUrl,

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { useAuth } from '../../contexts/AuthContext';
-import { Shield, Copy, Check, ArrowLeft } from 'lucide-react';
+import { Shield, Copy, Check } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const TwoFactorSetup: React.FC = () => {

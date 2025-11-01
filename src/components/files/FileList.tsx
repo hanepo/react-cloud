@@ -96,21 +96,29 @@ const FileList: React.FC = () => {
     setShowKeyPrompt(null);
 
     try {
+      console.log('📥 Starting file download:', file.name);
+      console.log('File metadata:', { id: file.id, iv: file.iv });
+      
       // Fetch the encrypted file
       const response = await fetch(file.downloadUrl!);
       if (!response.ok) throw new Error('Failed to download file');
       
       const encryptedData = await response.arrayBuffer();
+      console.log('Downloaded encrypted data:', encryptedData.byteLength, 'bytes');
       
       // Decrypt the file with user-provided key
+      console.log('Attempting decryption with provided key...');
       const decryptedData = decryptFile({
         data: encryptedData,
         iv: file.iv!
       }, decryptionKey);
 
       if (!decryptedData) {
+        console.error('❌ Decryption returned null');
         throw new Error('Decryption failed - incorrect key or corrupted file');
       }
+
+      console.log('✅ Decryption successful, creating download...');
 
       // Create blob and download
       const blob = new Blob([decryptedData], { type: file.type });
@@ -124,11 +132,22 @@ const FileList: React.FC = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast.success('File downloaded successfully');
+      toast.success('File downloaded and decrypted successfully');
       setDecryptionKey(''); // Clear key after successful download
     } catch (error: any) {
-      console.error('Download error:', error);
-      toast.error(error.message || 'Failed to download file');
+      console.error('❌ Download/Decryption error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        type: error.constructor.name
+      });
+      
+      // Show user-friendly error message
+      if (error.message.includes('incorrect key') || error.message.includes('Decryption failed')) {
+        toast.error('❌ Wrong decryption key! Please check your password and try again.');
+      } else {
+        toast.error(error.message || 'Failed to download file');
+      }
     } finally {
       setDownloadingFiles(prev => {
         const newSet = new Set(prev);

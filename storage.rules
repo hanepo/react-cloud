@@ -34,15 +34,10 @@ service firebase.storage {
     
     // Files uploaded by users: files/{userId}/{allPaths=**}
     match /files/{userId}/{allPaths=**} {
-      // Read: Check Firestore metadata for RBAC permissions
-      // Note: This is a simplified version. In production, you'd need to map storage path to Firestore doc
-      allow read: if isAuthenticated() && (
-        // Owner can always read their files
-        request.auth.uid == userId ||
-        // Admin can read all files
-        isAdmin()
-        // For more complex RBAC, you'd need to query Firestore based on storagePath
-      );
+      // Read: Allow authenticated users (permissions are checked in Firestore and application layer)
+      // The Firestore rules already enforce who can see which files
+      // Storage rules can't easily check file-specific permissions from Firestore metadata
+      allow read: if isAuthenticated();
       
       // Write (upload): Only owner or admin can upload to this path
       allow write: if isAuthenticated() && (

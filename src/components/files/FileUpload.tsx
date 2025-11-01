@@ -181,9 +181,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ selectedFolderId, onUploadCompl
         storagePath,
         folderPath: selectedFolder?.path || '/',
         ...(currentFolderId && { folderId: currentFolderId }), // Only include folderId if it's not null
-        // Add initial permissions (owner only by default)
-        allowedRoles: [currentUser.role], // Start with owner's role
-        allowedUsers: [currentUser.uid] // Start with owner's uid
+        // Add initial permissions - secure by default (admin only)
+        // Admin must explicitly grant access to other users/roles
+        allowedRoles: ['admin'], // Only admins can see by default
+        allowedUsers: [currentUser.uid] // Owner (uploader) is always in allowed users
       };
 
       await addDoc(collection(db, 'files'), fileMetadata);

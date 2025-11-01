@@ -80,33 +80,36 @@ const SignIn: React.FC = () => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8 mx-2 sm:mx-auto">
-        <div>
+        <div className="text-center">
           <div className="mx-auto h-16 w-16 flex items-center justify-center rounded-full bg-blue-600">
             <Lock className="h-8 w-8 text-white" />
           </div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
             Sign in to your account
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
+          <p className="mt-2 text-sm text-gray-600">
             Access your secure cloud storage
           </p>
         </div>
-        {/* TEMP: 2FA Enabled button for debugging */}
-        <button
-          type="button"
-          onClick={() => {
-            setRequires2FA(true);
-            setShow2FAInput(true);
-          }}
-          className="mb-2 px-2 py-1 bg-green-400 rounded"
-        >
-          2FA Enabled
-        </button>
-        <div className="bg-white rounded-lg shadow-md p-6">
-          {/* Debug: Show current state */}
-          
+
+        {/* 2FA Enabled button - centered and styled properly */}
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => {
+              setRequires2FA(true);
+              setShow2FAInput(true);
+            }}
+            className="inline-flex items-center px-4 py-2 bg-green-100 hover:bg-green-200 border border-green-200 rounded-lg transition-colors"
+          >
+            <Shield className="h-4 w-4 text-green-600 mr-2" />
+            <span className="text-sm font-medium text-green-800">2FA Enabled (Demo)</span>
+          </button>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-md p-8">
           {show2FAInput && (
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center">
                 <Shield className="h-5 w-5 text-blue-600 mr-2" />
                 <p className="text-sm text-blue-800">
@@ -115,15 +118,16 @@ const SignIn: React.FC = () => {
               </div>
             </div>
           )}
+
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-4">
               <div>
-                <label htmlFor="email" className="sr-only">
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
                   Email address
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <Mail className="h-6 w-6 text-gray-400" />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Mail className="h-5 w-5 text-gray-400" />
                   </div>
                   <input
                     id="email"
@@ -131,8 +135,8 @@ const SignIn: React.FC = () => {
                     type="email"
                     autoComplete="email"
                     required
-                    className="appearance-none rounded-lg relative block w-full pl-14 pr-4 py-5 text-lg border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10"
-                    placeholder="Email address"
+                    className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg placeholder-gray-400 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
+                    placeholder="Enter your email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                   />
@@ -140,12 +144,12 @@ const SignIn: React.FC = () => {
               </div>
               
               <div>
-                <label htmlFor="password" className="sr-only">
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
                   Password
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <Lock className="h-6 w-6 text-gray-400" />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Lock className="h-5 w-5 text-gray-400" />
                   </div>
                   <input
                     id="password"
@@ -153,21 +157,21 @@ const SignIn: React.FC = () => {
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
                     required
-                    className="appearance-none rounded-lg relative block w-full pl-14 pr-16 py-6 text-xl border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 transition-all"
-                    placeholder="Password"
+                    className="block w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg placeholder-gray-400 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
+                    placeholder="Enter your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
                   <button
                     type="button"
-                    className="absolute inset-y-0 right-0 pr-5 flex items-center focus:outline-none"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center focus:outline-none hover:bg-gray-50 rounded-r-lg transition-colors"
                     onClick={() => setShowPassword(!showPassword)}
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
                     {showPassword ? (
-                      <EyeOff className="h-6 w-6 text-gray-400 hover:text-gray-600" />
+                      <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-600" />
                     ) : (
-                      <Eye className="h-6 w-6 text-gray-400 hover:text-gray-600" />
+                      <Eye className="h-5 w-5 text-gray-400 hover:text-gray-600" />
                     )}
                   </button>
                 </div>
@@ -175,8 +179,8 @@ const SignIn: React.FC = () => {
               
               {show2FAInput && (
                 <div>
-                  <label htmlFor="totpToken" className="sr-only">
-                    2FA Code
+                  <label htmlFor="totpToken" className="block text-sm font-medium text-gray-700 mb-2">
+                    Two-Factor Authentication Code
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -187,15 +191,15 @@ const SignIn: React.FC = () => {
                       name="totpToken"
                       type="text"
                       required={show2FAInput}
-                      className="appearance-none rounded-lg relative block w-full px-12 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                      placeholder="Enter 6-digit 2FA code"
+                      className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg placeholder-gray-400 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center text-lg font-mono tracking-wider transition-colors"
+                      placeholder="000000"
                       value={totpToken}
                       onChange={(e) => setTotpToken(e.target.value.replace(/\D/g, ''))}
                       maxLength={6}
                       autoComplete="one-time-code"
                     />
                   </div>
-                  <p className="mt-2 text-sm text-gray-600">
+                  <p className="mt-2 text-sm text-gray-600 text-center">
                     Enter the 6-digit code from your authenticator app
                   </p>
                 </div>
@@ -215,7 +219,7 @@ const SignIn: React.FC = () => {
             <div className="mt-4 text-center">
               <span className="text-sm text-gray-600">
                 Don't have an account?{' '}
-                <Link to="/signup" className="font-medium text-blue-600 hover:text-blue-500">
+                <Link to="/signup" className="font-medium text-blue-600 hover:text-blue-500 transition-colors">
                   Sign up here
                 </Link>
               </span>

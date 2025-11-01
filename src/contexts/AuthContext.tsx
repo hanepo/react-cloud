@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { 
+import {
   type User as FirebaseUser,
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -10,6 +10,8 @@ import {
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { generateSecret, generateQRCodeURL, verifyTOTP } from '../utils/totp';
+import { logActivity } from '../utils/activityLog';
+import { DEFAULT_QUOTAS } from '../utils/storageQuota';
 import type { User, UserRole } from '../types';
 import toast from 'react-hot-toast';
 
@@ -81,9 +83,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         twoFactorEnabled: false,
         createdAt: new Date(),
         lastLogin: new Date(),
+        storageUsed: 0,
+        storageQuota: DEFAULT_QUOTAS[role]
       };
-      
+
       await setDoc(doc(db, 'users', user.uid), userData);
+
+      // Log activity
+      await logActivity({
+        userId: user.uid,
+        userEmail: email,
+        action: 'user_created',
+        resourceType: 'user',
+        resourceId: user.uid,
+        details: { role },
+        success: true
+      });
+
       toast.success('Account created successfully!');
     } catch (error: unknown) {
       if (error instanceof Error) {
@@ -117,12 +133,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           throw new Error('Invalid 2FA code');
         }
       }
-      
+
+      // Log successful login
+      await logActivity({
+        userId: user.uid,
+        userEmail: email,
+        action: 'login',
+        success: true
+      });
+
       toast.success('Signed in successfully!');
     } catch (error: unknown) {
+      // Log failed login
       if (error instanceof Error) {
-        // Don't show toast error for 2FA requirement - let the UI handle it
         if (error.message !== '2FA code required') {
+          await logActivity({
+            userId: '',
+            userEmail: email,
+            action: 'failed_login',
+            success: false,
+            errorMessage: error.message
+          }).catch(() => {});
+
           toast.error(error.message);
         }
       }
@@ -132,8 +164,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try {
+      const userEmail = currentUser?.email || '';
+      const userId = currentUser?.uid || '';
+
       await firebaseSignOut(auth);
       setCurrentUser(null);
+
+      // Log logout
+      if (userId) {
+        await logActivity({
+          userId,
+          userEmail,
+          action: 'logout',
+          success: true
+        });
+      }
+
       toast.success('Signed out successfully!');
     } catch (error: unknown) {
       if (error instanceof Error) {
@@ -145,7 +191,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateUserRole = async (uid: string, role: UserRole) => {
     try {
+      const userDoc = await getDoc(doc(db, 'users', uid));
+      const userData = userDoc.data();
+
       await updateDoc(doc(db, 'users', uid), { role });
+
+      // Log role change
+      if (currentUser) {
+        await logActivity({
+          userId: currentUser.uid,
+          userEmail: currentUser.email!,
+          action: 'role_changed',
+          resourceType: 'user',
+          resourceId: uid,
+          resourceName: userData?.email,
+          details: { newRole: role },
+          success: true
+        });
+      }
+
       toast.success('User role updated successfully!');
     } catch (error: unknown) {
       if (error instanceof Error) {
@@ -198,7 +262,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await updateDoc(doc(db, 'users', currentUser.uid), {
       twoFactorEnabled: true
     });
-    
+
+    // Log 2FA enablement
+    await logActivity({
+      userId: currentUser.uid,
+      userEmail: currentUser.email,
+      action: '2fa_enabled',
+      success: true
+    });
+
     // Update local state
     setCurrentUser(prev => prev ? { ...prev, twoFactorEnabled: true } : null);
   };

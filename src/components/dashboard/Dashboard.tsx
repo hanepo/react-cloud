@@ -3,20 +3,26 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import FileUpload from '../files/FileUpload';
 import FileManager from '../files/FileManager';
+import FileBrowser from '../files/FileBrowser';
 import UserManagement from '../admin/UserManagement';
-import { 
-  Shield, 
-  Upload, 
-  Files, 
-  Users, 
-  Settings, 
+import AccessRequestManagement from '../admin/AccessRequestManagement';
+import Analytics from '../admin/Analytics';
+import {
+  Shield,
+  Upload,
+  Files,
+  Users,
+  Settings,
   LogOut,
   User,
-  ChevronDown
+  ChevronDown,
+  Eye,
+  MessageSquare,
+  BarChart3
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-type TabType = 'files' | 'upload' | 'users' | 'profile';
+type TabType = 'files' | 'upload' | 'browse' | 'users' | 'requests' | 'analytics' | 'profile';
 
 const Dashboard: React.FC = () => {
   const { currentUser, signOut } = useAuth();
@@ -46,8 +52,11 @@ const Dashboard: React.FC = () => {
   const canManageUsers = currentUser?.role === 'admin';
 
   const tabs = [
-    { id: 'files', label: 'Files', icon: Files, show: true },
+    { id: 'files', label: 'My Files', icon: Files, show: true },
+    { id: 'browse', label: 'Browse Files', icon: Eye, show: true },
     { id: 'upload', label: 'Upload', icon: Upload, show: canUpload },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3, show: canManageUsers },
+    { id: 'requests', label: 'Access Requests', icon: MessageSquare, show: canManageUsers },
     { id: 'users', label: 'Users', icon: Users, show: canManageUsers },
     { id: 'profile', label: 'Profile', icon: User, show: true },
   ] as const;
@@ -145,8 +154,15 @@ const Dashboard: React.FC = () => {
         <div className="space-y-8">
           {activeTab === 'files' && (
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">File Manager</h2>
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">My Files</h2>
               <FileManager />
+            </div>
+          )}
+
+          {activeTab === 'browse' && (
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">Browse All Files</h2>
+              <FileBrowser />
             </div>
           )}
 
@@ -154,6 +170,20 @@ const Dashboard: React.FC = () => {
             <div>
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Upload Files</h2>
               <FileUpload />
+            </div>
+          )}
+
+          {activeTab === 'analytics' && canManageUsers && (
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">Analytics</h2>
+              <Analytics />
+            </div>
+          )}
+
+          {activeTab === 'requests' && canManageUsers && (
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">Access Requests</h2>
+              <AccessRequestManagement />
             </div>
           )}
 

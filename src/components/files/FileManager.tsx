@@ -11,7 +11,7 @@ import {
   updateDoc, // Import updateDoc for permissions
   getDocs // Import getDocs to fetch all users
 } from 'firebase/firestore';
-import { ref, deleteObject } from 'firebase/storage';
+import { ref, deleteObject, getBlob } from 'firebase/storage';
 import { db, storage } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { decryptFile } from '../../utils/encryption';
@@ -77,6 +77,7 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ file, isOpen, onClose
                     id: doc.id,
                     ...doc.data()
                 })) as User[];
+                console.log('Fetched users:', usersList.map(u => ({ id: u.id, uid: u.uid, email: u.email })));
                 setAllUsers(usersList);
             } catch (error) {
                 console.error('Error fetching users:', error);
@@ -109,13 +110,16 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ file, isOpen, onClose
     };
 
     const handleUserChange = (userId: string, checked: boolean) => {
+        console.log('handleUserChange called:', { userId, checked });
         setPendingUsers(prev => {
             const newSet = new Set(prev);
+            console.log('Previous pendingUsers:', Array.from(prev));
             if (checked) {
                 newSet.add(userId);
             } else {
                 newSet.delete(userId);
             }
+            console.log('New pendingUsers:', Array.from(newSet));
             return newSet;
         });
     };
@@ -123,9 +127,13 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ file, isOpen, onClose
     const handleSave = async () => {
         setIsSaving(true);
         try {
+            // Filter out undefined values
+            const rolesArray = Array.from(pendingRoles).filter(r => r !== undefined);
+            const usersArray = Array.from(pendingUsers).filter(u => u !== undefined && u !== null && u !== '');
+
             await onSave(file.id, {
-                roles: Array.from(pendingRoles),
-                users: Array.from(pendingUsers)
+                roles: rolesArray,
+                users: usersArray
             });
             onClose(); // Close modal on success
         } catch (error) {
@@ -193,17 +201,17 @@ const PermissionModal: React.FC<PermissionModalProps> = ({ file, isOpen, onClose
                                          <p className="text-sm text-gray-500 text-center py-2">No users available</p>
                                      ) : (
                                          allUsers.map((user) => (
-                                             <div key={user.uid} className="flex items-center justify-between py-1 hover:bg-white px-2 rounded">
+                                             <div key={user.uid || user.id} className="flex items-center justify-between py-1 hover:bg-white px-2 rounded">
                                                  <div className="flex items-center flex-1">
                                                      <input
-                                                         id={`user-${user.uid}`}
+                                                         id={`user-${user.uid || user.id}`}
                                                          name="users"
                                                          type="checkbox"
-                                                         checked={pendingUsers.has(user.uid)}
-                                                         onChange={(e) => handleUserChange(user.uid, e.target.checked)}
+                                                         checked={pendingUsers.has(user.uid || user.id || '')}
+                                                         onChange={(e) => handleUserChange(user.uid || user.id || '', e.target.checked)}
                                                          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                                                      />
-                                                     <label htmlFor={`user-${user.uid}`} className="ml-3 block text-sm text-gray-700 flex-1">
+                                                     <label htmlFor={`user-${user.uid || user.id}`} className="ml-3 block text-sm text-gray-700 flex-1">
                                                          <div>{user.email}</div>
                                                          <div className="text-xs text-gray-500">
                                                              Role: <span className="capitalize">{user.role}</span>
@@ -266,21 +274,6 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
 
     setLoading(true);
     
-    // We need to fetch files in two queries since Firestore doesn't support OR queries with different fields
-    // Query 1: Files uploaded by the user
-    const ownFilesQuery = query(
-      collection(db, 'files'),
-      where('uploadedBy', '==', currentUser.uid),
-      orderBy('uploadedAt', 'desc')
-    );
-
-    // Query 2: Files where user is in allowedUsers array
-    const sharedFilesQuery = query(
-      collection(db, 'files'),
-      where('allowedUsers', 'array-contains', currentUser.uid),
-      orderBy('uploadedAt', 'desc')
-    );
-
     const allFilesMap = new Map<string, FileMetadata>();
 
     const processSnapshot = (snapshot: any) => {
@@ -299,21 +292,52 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
       setLoading(false);
     };
 
-    // Listen to both queries
-    const unsubscribeOwnFiles = onSnapshot(ownFilesQuery, processSnapshot, (error) => {
-      console.error("Error fetching own files:", error);
-      toast.error("Could not load your files.");
-      setLoading(false);
-    });
+    let unsubscribeFiles: (() => void) | null = null;
+    let unsubscribeFiles2: (() => void) | null = null;
 
-    const unsubscribeSharedFiles = onSnapshot(sharedFilesQuery, processSnapshot, (error) => {
-      console.error("Error fetching shared files:", error);
-      // Don't show error toast for shared files as it might be empty
-      setLoading(false);
-    });
+    // If user is admin, get ALL files
+    if (currentUser.role === 'admin') {
+      const allFilesQuery = query(
+        collection(db, 'files'),
+        orderBy('uploadedAt', 'desc')
+      );
 
+      unsubscribeFiles = onSnapshot(allFilesQuery, processSnapshot, (error) => {
+        console.error("Error fetching all files:", error);
+        toast.error("Could not load files.");
+        setLoading(false);
+      });
+    } else {
+      // For non-admin users, use the existing dual query system
+      // Query 1: Files uploaded by the user
+      const ownFilesQuery = query(
+        collection(db, 'files'),
+        where('uploadedBy', '==', currentUser.uid),
+        orderBy('uploadedAt', 'desc')
+      );
 
-    // Listen to folders
+      // Query 2: Files where user is in allowedUsers array
+      const sharedFilesQuery = query(
+        collection(db, 'files'),
+        where('allowedUsers', 'array-contains', currentUser.uid),
+        orderBy('uploadedAt', 'desc')
+      );
+
+      // Listen to both queries
+      unsubscribeFiles = onSnapshot(ownFilesQuery, processSnapshot, (error) => {
+        console.error("Error fetching own files:", error);
+        toast.error("Could not load your files.");
+        setLoading(false);
+      });
+
+      unsubscribeFiles2 = onSnapshot(sharedFilesQuery, processSnapshot, (error) => {
+        console.error("Error fetching shared files:", error);
+        // Don't show error toast for shared files as it might be empty
+        setLoading(false);
+      });
+    }
+
+    // Listen to folders (for both admin and non-admin)
     const foldersQuery = query(
       collection(db, 'folders'),
       where('createdBy', '==', currentUser.uid),
@@ -330,8 +354,8 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
     });
 
     return () => {
-      unsubscribeOwnFiles();
-      unsubscribeSharedFiles();
+      if (unsubscribeFiles) unsubscribeFiles();
+      if (unsubscribeFiles2) unsubscribeFiles2();
       unsubscribeFolders();
     };
   }, [currentUser]);
@@ -442,11 +466,12 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
     let decryptedData: ArrayBuffer | null = null; // Initialize as null
 
     try {
-      // Fetch the encrypted file
-      const response = await fetch(fileToDownload.downloadUrl);
-      if (!response.ok) throw new Error(`Failed to download file (status: ${response.status})`);
-
-      const encryptedData = await response.arrayBuffer();
+      // Fetch the encrypted file using Firebase SDK (bypasses CORS)
+      console.log('🔽 Downloading file from Firebase Storage...');
+      const fileRef = ref(storage, fileToDownload.storagePath || fileToDownload.encryptedPath || '');
+      const encryptedBlob = await getBlob(fileRef);
+      const encryptedData = await encryptedBlob.arrayBuffer();
+      console.log('✅ File downloaded, size:', encryptedData.byteLength, 'bytes');
 
       // Decrypt the file using the provided key and stored IV
       decryptedData = decryptFile({ // Assign result here

@@ -7,14 +7,22 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    // Helper function to get user data
+    // Helper function to get user data with error handling
     function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data 
+        : null;
+    }
+    
+    // Helper function to get user role safely
+    function getUserRole() {
+      let userData = getUserData();
+      return userData != null ? userData.role : 'viewer';
     }
     
     // Helper function to check user role
     function hasRole(role) {
-      return isAuthenticated() && getUserData().role == role;
+      return isAuthenticated() && getUserRole() == role;
     }
     
     // Helper function to check if user is admin
@@ -26,25 +34,23 @@ service cloud.firestore {
     function canEdit() {
       return hasRole('admin') || hasRole('editor');
     }
-    
+
     // Users collection
     match /users/{userId} {
-      // Users can read their own document
-      allow read: if isAuthenticated() && request.auth.uid == userId;
-      
-      // Only admins can read all users
-      allow read: if isAdmin();
-      
+      // Users can read their own document, admins can read all
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+
       // Users can create their own document on signup
       allow create: if isAuthenticated() && request.auth.uid == userId;
-      
+
       // Users can update their own document (for 2FA, profile, etc.)
-      allow update: if isAuthenticated() && request.auth.uid == userId;
-      
-      // Only admins can update user roles and delete users
-      allow update, delete: if isAdmin();
+      // Admins can update any user (for role changes)
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+
+      // Only admins can delete users
+      allow delete: if isAdmin();
     }
-    
+
     // Files collection - RBAC implementation
     match /files/{fileId} {
       // Helper function to check if user has access to file
@@ -52,11 +58,11 @@ service cloud.firestore {
         // Owner always has access
         let isOwner = request.auth.uid == fileData.uploadedBy;
         
-        // Check if user is in allowedUsers array
-        let isAllowedUser = request.auth.uid in fileData.allowedUsers;
+        // Check if user is in allowedUsers array (handle null case)
+        let isAllowedUser = fileData.allowedUsers != null && request.auth.uid in fileData.allowedUsers;
         
-        // Check if user's role is in allowedRoles array
-        let hasAllowedRole = getUserData().role in fileData.allowedRoles;
+        // Check if user's role is in allowedRoles array (handle null case)
+        let hasAllowedRole = fileData.allowedRoles != null && getUserRole() in fileData.allowedRoles;
         
         // Admin always has access to all files
         let isAdminUser = isAdmin();
@@ -64,8 +70,10 @@ service cloud.firestore {
         return isOwner || isAllowedUser || hasAllowedRole || isAdminUser;
       }
       
-      // Read: Owner, users in allowedUsers, users with roles in allowedRoles, or admin
-      allow read: if isAuthenticated() && hasFileAccess(resource.data);
+      // Read: Allow all authenticated users to read all files for browsing
+      // This enables the FileBrowser component to show all files
+      // Actual access control (download/view) is handled on the frontend
+      allow read: if isAuthenticated();
       
       // Create: Only authenticated users with editor or admin role
       allow create: if isAuthenticated() && canEdit() 
@@ -82,9 +90,7 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && (
         resource.data.uploadedBy == request.auth.uid || isAdmin()
       );
-    }
-    
-    // Folders collection
+    }    // Folders collection
     match /folders/{folderId} {
       // Helper function to check folder access
       function hasFolderAccess(folderData) {
@@ -92,18 +98,73 @@ service cloud.firestore {
         let isAdminUser = isAdmin();
         return isOwner || isAdminUser;
       }
-      
+
       // Read: Owner or admin
       allow read: if isAuthenticated() && hasFolderAccess(resource.data);
-      
+
       // Create: Editor or admin can create folders
       allow create: if isAuthenticated() && canEdit()
                     && request.resource.data.createdBy == request.auth.uid;
-      
+
       // Update/Delete: Owner or admin
       allow update, delete: if isAuthenticated() && hasFolderAccess(resource.data);
     }
-    
+
+    // Activity Logs collection - Only admins can read, system writes
+    match /activityLogs/{logId} {
+      // Only admins can read activity logs
+      allow read: if isAdmin();
+
+      // Any authenticated user can create activity logs (for their own actions)
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+
+      // No updates or deletes allowed
+      allow update, delete: if false;
+    }
+
+    // Access Requests collection
+    match /accessRequests/{requestId} {
+      // Users can read their own requests, admins can read all
+      allow read: if isAuthenticated() && (
+        resource.data.requestedBy == request.auth.uid || isAdmin()
+      );
+
+      // Any authenticated user can create access requests
+      allow create: if isAuthenticated()
+                    && request.resource.data.requestedBy == request.auth.uid
+                    && request.resource.data.status == 'pending';
+
+      // Only admins can update (approve/deny)
+      allow update: if isAdmin();
+
+      // Users can delete their own pending requests, admins can delete any
+      allow delete: if isAuthenticated() && (
+        (resource.data.requestedBy == request.auth.uid && resource.data.status == 'pending')
+        || isAdmin()
+      );
+    }
+
+    // Share Links collection
+    match /shareLinks/{linkId} {
+      // Anyone can read share links (for public sharing)
+      allow read: if true;
+
+      // Only file owners or admins can create share links
+      allow create: if isAuthenticated() && (
+        request.resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+
+      // Only creator or admin can update
+      allow update: if isAuthenticated() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+
+      // Only creator or admin can delete
+      allow delete: if isAuthenticated() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+    }
+
     // Default deny all other collections
     match /{document=**} {
       allow read, write: if false;

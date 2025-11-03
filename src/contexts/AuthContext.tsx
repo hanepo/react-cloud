@@ -24,6 +24,7 @@ interface AuthContextType {
   updateUserRole: (uid: string, role: UserRole) => Promise<void>;
   setup2FA: () => Promise<{ secret: string; qrCodeUrl: string }>;
   verify2FA: (token: string) => Promise<void>;
+  reloadUserData: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,6 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             uid: firebaseUser.uid,
             email: firebaseUser.email!,
             displayName: firebaseUser.displayName || userData.displayName,
+            phoneNumber: userData.phoneNumber,
             role: userData.role || 'viewer',
             twoFactorEnabled: userData.twoFactorEnabled || false,
             twoFactorSecret: userData.twoFactorSecret,
@@ -275,6 +277,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentUser(prev => prev ? { ...prev, twoFactorEnabled: true } : null);
   };
 
+  const reloadUserData = async () => {
+    if (!auth.currentUser) {
+      return;
+    }
+
+    try {
+      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setCurrentUser({
+          uid: auth.currentUser.uid,
+          email: auth.currentUser.email!,
+          displayName: auth.currentUser.displayName || userData.displayName,
+          phoneNumber: userData.phoneNumber,
+          role: userData.role || 'viewer',
+          twoFactorEnabled: userData.twoFactorEnabled || false,
+          twoFactorSecret: userData.twoFactorSecret,
+          createdAt: userData.createdAt?.toDate() || new Date(),
+          lastLogin: userData.lastLogin?.toDate() || new Date(),
+          storageUsed: userData.storageUsed,
+          storageQuota: userData.storageQuota,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to reload user data:', error);
+    }
+  };
+
   const value: AuthContextType = {
     currentUser,
     loading,
@@ -284,6 +314,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     updateUserRole,
     setup2FA,
     verify2FA,
+    reloadUserData,
   };
 
   return (

@@ -6,7 +6,11 @@ import {
   onSnapshot,
   doc,
   updateDoc,
-  arrayUnion
+  arrayUnion,
+  deleteDoc,
+  writeBatch,
+  where,
+  getDocs
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -18,7 +22,8 @@ import {
   Clock,
   File,
   User,
-  Calendar
+  Calendar,
+  Trash2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -26,6 +31,8 @@ const AccessRequestManagement: React.FC = () => {
   const { currentUser } = useAuth();
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
+  const [clearLoading, setClearLoading] = useState(false);
 
   useEffect(() => {
     if (currentUser?.role !== 'admin') return;
@@ -71,6 +78,72 @@ const AccessRequestManagement: React.FC = () => {
     } catch (error) {
       console.error(`Error ${action}ing access request:`, error);
       toast.error(`Failed to ${action} access request`);
+    }
+  };
+
+  const handleDeleteRequest = async (requestId: string) => {
+    if (!currentUser) return;
+    
+    const confirmed = window.confirm(
+      'Are you sure you want to delete this access request?\n\n' +
+      'This action cannot be undone and will permanently remove the request from the system.'
+    );
+    
+    if (!confirmed) return;
+
+    try {
+      setDeleteLoading(requestId);
+      await deleteDoc(doc(db, 'accessRequests', requestId));
+      toast.success('Access request deleted successfully');
+    } catch (error) {
+      console.error('Error deleting request:', error);
+      toast.error('Failed to delete request');
+    } finally {
+      setDeleteLoading(null);
+    }
+  };
+
+  const handleClearProcessedRequests = async () => {
+    if (!currentUser) return;
+    
+    const confirmed = window.confirm(
+      'Are you sure you want to clear ALL processed requests?\n\n' +
+      'This will permanently delete all approved and denied requests from the system.\n' +
+      'This action cannot be undone.\n\n' +
+      `Found ${processedRequests.length} processed requests to delete.`
+    );
+    
+    if (!confirmed) return;
+
+    try {
+      setClearLoading(true);
+      
+      // Query for all processed requests (approved or denied)
+      const processedQuery = query(
+        collection(db, 'accessRequests'),
+        where('status', 'in', ['approved', 'denied'])
+      );
+      
+      const snapshot = await getDocs(processedQuery);
+      
+      if (snapshot.empty) {
+        toast('No processed requests to clear', { icon: 'ℹ️' });
+        return;
+      }
+
+      // Batch delete all processed requests
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      
+      await batch.commit();
+      toast.success(`Successfully cleared ${snapshot.size} processed requests`);
+    } catch (error) {
+      console.error('Error clearing processed requests:', error);
+      toast.error('Failed to clear processed requests');
+    } finally {
+      setClearLoading(false);
     }
   };
 
@@ -193,10 +266,22 @@ const AccessRequestManagement: React.FC = () => {
       {/* Processed Requests */}
       {processedRequests.length > 0 && (
         <div className="bg-white shadow-sm rounded-lg border">
-          <div className="px-6 py-4 border-b border-gray-200">
+          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
             <h3 className="text-lg font-medium text-gray-900">
               Processed Requests ({processedRequests.length})
             </h3>
+            <button
+              onClick={handleClearProcessedRequests}
+              disabled={clearLoading}
+              className="flex items-center gap-2 px-4 py-2 text-sm bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {clearLoading ? (
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-red-600 border-t-transparent"></div>
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              {clearLoading ? 'Clearing...' : 'Clear All'}
+            </button>
           </div>
           
           <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
@@ -220,14 +305,31 @@ const AccessRequestManagement: React.FC = () => {
                             <span>{formatDate(request.respondedAt || request.requestedAt)}</span>
                           </div>
                         </div>
+                        {request.message && (
+                          <p className="text-xs text-gray-500 mt-1 italic">
+                            "{request.message}"
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
                   
-                  <div className="ml-4">
+                  <div className="flex items-center space-x-3 ml-4">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status)}`}>
                       {request.status}
                     </span>
+                    <button
+                      onClick={() => handleDeleteRequest(request.id)}
+                      disabled={deleteLoading === request.id}
+                      className="flex items-center justify-center w-8 h-8 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
+                      title="Delete request"
+                    >
+                      {deleteLoading === request.id ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-red-600 border-t-transparent"></div>
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </button>
                   </div>
                 </div>
               </div>

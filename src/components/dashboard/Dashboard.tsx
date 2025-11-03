@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
 import FileUpload from '../files/FileUpload';
 import FileManager from '../files/FileManager';
 import FileBrowser from '../files/FileBrowser';
 import UserManagement from '../admin/UserManagement';
 import AccessRequestManagement from '../admin/AccessRequestManagement';
 import Analytics from '../admin/Analytics';
+import ProfileSettings from '../profile/ProfileSettings';
 import {
   Shield,
   Upload,
@@ -26,7 +26,6 @@ type TabType = 'files' | 'upload' | 'browse' | 'users' | 'requests' | 'analytics
 
 const Dashboard: React.FC = () => {
   const { currentUser, signOut } = useAuth();
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>('files');
   const [showUserMenu, setShowUserMenu] = useState(false);
 
@@ -195,53 +194,7 @@ const Dashboard: React.FC = () => {
           )}
 
           {activeTab === 'profile' && (
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Profile Settings</h2>
-              <div className="bg-white shadow rounded-lg p-6">
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Email</label>
-                    <div className="mt-1 text-sm text-gray-900">{currentUser?.email}</div>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Role</label>
-                    <div className="mt-1">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getRoleColor(currentUser?.role || '')}`}>
-                        {currentUser?.role}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Two-Factor Authentication</label>
-                    <div className="mt-1 flex items-center justify-between">
-                      <div className="flex items-center">
-                        <Shield className={`h-4 w-4 mr-2 ${currentUser?.twoFactorEnabled ? 'text-green-600' : 'text-gray-400'}`} />
-                        <span className="text-sm text-gray-900">
-                          {currentUser?.twoFactorEnabled ? 'Enabled' : 'Disabled'}
-                        </span>
-                      </div>
-                      {!currentUser?.twoFactorEnabled && (
-                        <button
-                          onClick={() => navigate('/setup-2fa')}
-                          className="text-sm text-blue-600 hover:text-blue-500 font-medium"
-                        >
-                          Enable 2FA
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Account Created</label>
-                    <div className="mt-1 text-sm text-gray-900">
-                      {currentUser?.createdAt ? new Date(currentUser.createdAt).toLocaleDateString() : 'Unknown'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <ProfileSettings />
           )}
         </div>
       </div>

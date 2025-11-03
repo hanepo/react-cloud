@@ -26,6 +26,7 @@ export interface User {
   uid: string;                // Auth uid (required)
   email: string;
   displayName?: string;
+  phoneNumber?: string;       // User's phone number
   role: UserRole;
   twoFactorEnabled: boolean;
   twoFactorSecret?: string;   // stored only if user opted in (sensitive)

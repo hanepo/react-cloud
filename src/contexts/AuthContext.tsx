@@ -47,12 +47,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
           const userData = userDoc.data();
+          // Ensure role is a valid UserRole string, not an object
+          let userRole: UserRole = 'viewer';
+          if (typeof userData.role === 'string' && ['admin', 'editor', 'viewer'].includes(userData.role)) {
+            userRole = userData.role as UserRole;
+          }
+          
           setCurrentUser({
             uid: firebaseUser.uid,
             email: firebaseUser.email!,
             displayName: firebaseUser.displayName || userData.displayName,
             phoneNumber: userData.phoneNumber,
-            role: userData.role || 'viewer',
+            role: userRole,
             twoFactorEnabled: userData.twoFactorEnabled || false,
             twoFactorSecret: userData.twoFactorSecret,
             createdAt: userData.createdAt?.toDate() || new Date(),
@@ -286,12 +292,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
       if (userDoc.exists()) {
         const userData = userDoc.data();
+        // Ensure role is a valid UserRole string, not an object
+        let userRole: UserRole = 'viewer';
+        if (typeof userData.role === 'string' && ['admin', 'editor', 'viewer'].includes(userData.role)) {
+          userRole = userData.role as UserRole;
+        }
+        
         setCurrentUser({
           uid: auth.currentUser.uid,
           email: auth.currentUser.email!,
           displayName: auth.currentUser.displayName || userData.displayName,
           phoneNumber: userData.phoneNumber,
-          role: userData.role || 'viewer',
+          role: userRole,
           twoFactorEnabled: userData.twoFactorEnabled || false,
           twoFactorSecret: userData.twoFactorSecret,
           createdAt: userData.createdAt?.toDate() || new Date(),

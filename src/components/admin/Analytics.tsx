@@ -381,11 +381,16 @@ const Analytics: React.FC = () => {
                       {activity.userEmail || 'Unknown User'}
                     </p>
                     <p className="text-sm text-gray-500 mt-1">
-                      {formatActivityAction(activity.action)}
+                      {formatActivityAction(activity.action || 'unknown')}
                       {activity.resourceName && ` - ${activity.resourceName}`}
                     </p>
-                    {activity.details && (
+                    {activity.details && typeof activity.details === 'string' && (
                       <p className="text-xs text-gray-400 mt-1">{activity.details}</p>
+                    )}
+                    {activity.details && typeof activity.details === 'object' && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        {JSON.stringify(activity.details)}
+                      </p>
                     )}
                   </div>
                   <div className="text-xs text-gray-400 ml-4 whitespace-nowrap">

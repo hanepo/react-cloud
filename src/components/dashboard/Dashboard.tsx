@@ -173,10 +173,7 @@ const Dashboard: React.FC = () => {
           )}
 
           {activeTab === 'analytics' && canManageUsers && (
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Analytics</h2>
-              <Analytics />
-            </div>
+            <Analytics />
           )}
 
           {activeTab === 'requests' && canManageUsers && (

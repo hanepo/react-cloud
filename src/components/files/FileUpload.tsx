@@ -5,6 +5,7 @@ import { storage, db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 // Note: Removed the hardcoded VITE_ENCRYPTION_KEY import
 import { encryptFile } from '../../utils/encryption';
+import { sanitizeFilename, sanitizeFolderPath, isValidStoragePath } from '../../utils/pathSecurity';
 import { Upload, X, File, CheckCircle, AlertCircle, Folder, Key, Eye, EyeOff } from 'lucide-react';
 import type { Folder as FolderType } from '../../types';
 import toast from 'react-hot-toast';
@@ -153,12 +154,19 @@ const FileUpload: React.FC<FileUploadProps> = ({ selectedFolderId, onUploadCompl
       const encryptedBlob = new Blob([encryptedData.data]);
 
       // Upload to Firebase Storage with folder path
-      const fileName = `${Date.now()}_${fileState.file.name}`;
+      // Sanitize filename to prevent directory traversal attacks
+      const sanitizedFileName = sanitizeFilename(fileState.file.name);
+      const fileName = `${Date.now()}_${sanitizedFileName}`;
       const selectedFolder = folders.find(f => f.id === currentFolderId);
-      const folderPath = selectedFolder ? selectedFolder.path.replace(/^\//, '') : '';
+      const folderPath = selectedFolder ? sanitizeFolderPath(selectedFolder.path.replace(/^\//, '')) : '';
       const storagePath = folderPath
         ? `files/${currentUser.uid}/${folderPath}/${fileName}`
         : `files/${currentUser.uid}/${fileName}`;
+
+      // Validate the constructed storage path
+      if (!isValidStoragePath(storagePath, currentUser.uid)) {
+        throw new Error('Invalid storage path detected - security check failed');
+      }
 
       const storageRef = ref(storage, storagePath);
 

@@ -15,6 +15,7 @@ import { ref, deleteObject, getBlob } from 'firebase/storage';
 import { db, storage } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { decryptFile } from '../../utils/encryption';
+import { isValidStoragePath } from '../../utils/pathSecurity';
 import type { FileMetadata, Folder, UserRole, User } from '../../types'; // Import User type
 import FolderTree from './FolderTree';
 import {
@@ -460,6 +461,16 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
       return;
     }
 
+    // Validate storage path to prevent directory traversal
+    const storagePath = fileToDownload.storagePath || fileToDownload.encryptedPath || '';
+    if (!isValidStoragePath(storagePath, currentUser!.uid)) {
+      console.error('🚨 Security: Invalid storage path detected:', storagePath);
+      toast.error('Security check failed - invalid file path');
+      setShowKeyPrompt(null);
+      setDecryptionKey('');
+      return;
+    }
+
     setDownloadingFiles(prev => new Set(prev).add(fileToDownload.id));
     setShowKeyPrompt(null); // Close prompt
 
@@ -468,7 +479,7 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
     try {
       // Fetch the encrypted file using Firebase SDK (bypasses CORS)
       console.log('🔽 Downloading file from Firebase Storage...');
-      const fileRef = ref(storage, fileToDownload.storagePath || fileToDownload.encryptedPath || '');
+      const fileRef = ref(storage, storagePath);
       const encryptedBlob = await getBlob(fileRef);
       const encryptedData = await encryptedBlob.arrayBuffer();
       console.log('✅ File downloaded, size:', encryptedData.byteLength, 'bytes');
@@ -531,8 +542,13 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
       // Delete from Firestore
       await deleteDoc(doc(db, 'files', file.id));
 
-      // Delete from Storage
+      // Delete from Storage with path validation
       if (file.storagePath) {
+        // Validate storage path before deletion
+        if (!isValidStoragePath(file.storagePath, currentUser!.uid)) {
+          console.error('🚨 Security: Invalid storage path during delete:', file.storagePath);
+          throw new Error('Security check failed - invalid file path');
+        }
         const storageRef = ref(storage, file.storagePath);
         await deleteObject(storageRef);
       } else {
@@ -566,8 +582,13 @@ const FileManager: React.FC<FileManagerProps> = ({ className }) => {
            // Delete from Firestore
            await deleteDoc(doc(db, 'files', file.id));
 
-           // Delete from Storage
+           // Delete from Storage with path validation
            if (file.storagePath) {
+             // Validate storage path before deletion
+             if (!isValidStoragePath(file.storagePath, currentUser!.uid)) {
+               console.error('🚨 Security: Invalid storage path during batch delete:', file.storagePath);
+               throw new Error('Security check failed - invalid file path');
+             }
              const storageRef = ref(storage, file.storagePath);
              await deleteObject(storageRef);
            } else {

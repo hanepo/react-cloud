@@ -15,6 +15,35 @@ const SignUp: React.FC = () => {
   const { signUp } = useAuth();
   const navigate = useNavigate();
 
+  const validatePasswordStrength = (pwd: string): { isValid: boolean; message: string } => {
+    // Minimum 8 characters
+    if (pwd.length < 8) {
+      return { isValid: false, message: 'Password must be at least 8 characters long' };
+    }
+    
+    // Must contain at least one uppercase letter
+    if (!/[A-Z]/.test(pwd)) {
+      return { isValid: false, message: 'Password must contain at least one uppercase letter' };
+    }
+    
+    // Must contain at least one lowercase letter
+    if (!/[a-z]/.test(pwd)) {
+      return { isValid: false, message: 'Password must contain at least one lowercase letter' };
+    }
+    
+    // Must contain at least one number
+    if (!/[0-9]/.test(pwd)) {
+      return { isValid: false, message: 'Password must contain at least one number' };
+    }
+    
+    // Must contain at least one special character
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd)) {
+      return { isValid: false, message: 'Password must contain at least one special character (!@#$%^&*...)' };
+    }
+    
+    return { isValid: true, message: 'Password is strong' };
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -23,8 +52,10 @@ const SignUp: React.FC = () => {
       return;
     }
     
-    if (password.length < 6) {
-      toast.error('Password must be at least 6 characters');
+    // Validate password strength
+    const passwordValidation = validatePasswordStrength(password);
+    if (!passwordValidation.isValid) {
+      toast.error(passwordValidation.message);
       return;
     }
     
@@ -132,6 +163,9 @@ const SignUp: React.FC = () => {
                     )}
                   </button>
                 </div>
+                <p className="mt-2 text-xs text-gray-600">
+                  Must be at least 8 characters with uppercase, lowercase, number, and special character (e.g., Admin000*)
+                </p>
               </div>
               
               <div>
